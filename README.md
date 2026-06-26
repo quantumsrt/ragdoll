@@ -86,5 +86,8 @@ ragdoll:Destroy()     -- clean up
    collision sphere inside it.
 
 `:Deactivate()` reverses all of it: destroys the sockets, attachments, welds and
-spheres, re-enables the motors, re-collides the limbs, and returns the Humanoid
-to the `GettingUp` state. Activation is fully reversible.
+spheres, re-enables the motors, and re-collides the limbs. Before handing control
+back it snaps the `HumanoidRootPart` upright (keeping only its yaw) and zeroes
+every part's velocity, so the character stands up cleanly instead of toppling
+from leftover ragdoll angle or momentum. Then it returns the Humanoid to the
+`GettingUp` state. Activation is fully reversible.

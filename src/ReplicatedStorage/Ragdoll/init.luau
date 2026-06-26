@@ -281,6 +281,34 @@ function Ragdoll.Deactivate(self: Ragdoll)
 	table.clear(self._spheres)
 	table.clear(self._motors)
 
+	-- Stand the rig upright before handing control back. With the motors
+	-- re-enabled the whole body is rigid relative to the HumanoidRootPart, so
+	-- snapping the root upright snaps the character upright too. Without this the
+	-- root is still lying at a ragdolled angle and the Humanoid topples the
+	-- moment it tries to stand.
+	local character = self.Character
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if root and root:IsA("BasePart") then
+		local position = root.Position
+		-- Keep only the yaw of the current facing so the character stands up
+		-- facing roughly where it was, never pitched or rolled.
+		local look = root.CFrame.LookVector
+		local flat = Vector3.new(look.X, 0, look.Z)
+		if flat.Magnitude < 1e-3 then
+			flat = Vector3.new(0, 0, -1)
+		end
+		root.CFrame = CFrame.lookAt(position, position + flat.Unit)
+	end
+
+	-- Clear leftover ragdoll momentum so nothing carries the body over once the
+	-- joints are rigid again.
+	for _, part in character:GetDescendants() do
+		if part:IsA("BasePart") then
+			part.AssemblyLinearVelocity = Vector3.zero
+			part.AssemblyAngularVelocity = Vector3.zero
+		end
+	end
+
 	local humanoid = self.Humanoid
 	humanoid.PlatformStand = false
 	humanoid.AutoRotate = true
