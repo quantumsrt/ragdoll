@@ -74,8 +74,9 @@ ragdoll:Destroy()     -- clean up
 
 `:Activate()`:
 
-1. Puts the `Humanoid` into the `Physics` state and sets `PlatformStand` so it
-   stops trying to stand.
+1. Disables the engine's own `Ragdoll`, `FallingDown` and `GettingUp` states,
+   puts the `Humanoid` into the `Physics` state, and sets `PlatformStand` so
+   vanilla balance can't tip the character over or fight the custom ragdoll.
 2. Replaces the five torso joints (`Neck`, `Left/Right Shoulder`,
    `Left/Right Hip`) with `BallSocketConstraint`s built from attachments at each
    joint's `C0` / `C1`. The `RootJoint` is left intact so the rig stays in one

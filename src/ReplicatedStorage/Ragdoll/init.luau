@@ -211,8 +211,13 @@ function Ragdoll.Activate(self: Ragdoll)
 	local humanoid = self.Humanoid
 
 	-- Hand control to the physics solver and stop the Humanoid from fighting it.
-	humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+	-- Disabling the engine's own Ragdoll / FallingDown / GettingUp states keeps
+	-- vanilla balance from tipping the character over or trying to stand it back
+	-- up while our sphere ragdoll is in control.
+	humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+	humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
 	humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
+	humanoid:ChangeState(Enum.HumanoidStateType.Physics)
 	humanoid.PlatformStand = true
 	humanoid.AutoRotate = false
 
@@ -279,6 +284,8 @@ function Ragdoll.Deactivate(self: Ragdoll)
 	local humanoid = self.Humanoid
 	humanoid.PlatformStand = false
 	humanoid.AutoRotate = true
+	humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true)
+	humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
 	humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
 	humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
 end
