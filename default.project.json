@@ -1,0 +1,29 @@
+{
+	"name": "ragdoll",
+	"tree": {
+		"$className": "DataModel",
+		"ReplicatedStorage": {
+			"$className": "ReplicatedStorage",
+			"Ragdoll": {
+				"$path": "src/ReplicatedStorage/Ragdoll"
+			}
+		},
+		"ServerScriptService": {
+			"$className": "ServerScriptService",
+			"$path": "src/ServerScriptService"
+		},
+		"StarterPlayer": {
+			"$className": "StarterPlayer",
+			"StarterPlayerScripts": {
+				"$className": "StarterPlayerScripts",
+				"$path": "src/StarterPlayer/StarterPlayerScripts"
+			}
+		},
+		"Workspace": {
+			"$className": "Workspace",
+			"$properties": {
+				"Gravity": 196.2
+			}
+		}
+	}
+}

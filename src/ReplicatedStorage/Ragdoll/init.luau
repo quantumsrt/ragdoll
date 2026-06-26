@@ -1,0 +1,263 @@
+--!strict
+--[[
+	Ragdoll
+	=======
+
+	A drop-in ragdoll system for R6 and R15 characters.
+
+	Core idea
+	---------
+	Roblox character limbs are boxy. When you let those boxes collide with the
+	world during a ragdoll they snag on edges, jitter, and clip through seams.
+	Instead of relying on the limb meshes for collision, this system disables
+	collision on every limb and attaches an invisible **collision sphere** to
+	each one. Spheres roll smoothly over geometry, never catch on corners, and
+	keep the simulation cheap and stable.
+
+	The visible limbs ride along (welded to their spheres via the original
+	joints, which are swapped from rigid `Motor6D`s to `BallSocketConstraint`s)
+	so the character still looks correct while the physics is driven entirely by
+	the hidden spheres.
+
+	Usage
+	-----
+		local Ragdoll = require(ReplicatedStorage.Ragdoll)
+
+		local ragdoll = Ragdoll.new(character)
+		ragdoll:Activate()    -- go limp
+		ragdoll:Deactivate()  -- stand back up
+		ragdoll:Destroy()     -- clean up references
+
+	The module is purely physical: it touches joints, collisions and the
+	Humanoid state, but never destroys the original rig, so activation is fully
+	reversible.
+]]
+
+local Ragdoll = {}
+Ragdoll.__index = Ragdoll
+
+export type Config = {
+	-- Sphere diameter is `max(limb.Size) * SphereScale`. 1 wraps the limb
+	-- exactly; slightly under 1 (default) hugs it so the silhouette reads right.
+	SphereScale: number,
+	-- Render the collision spheres for debugging.
+	ShowSpheres: boolean,
+	-- Joint swing/twist limits keep the pose from folding into a knot.
+	BallSocketUpperAngle: number,
+	BallSocketTwistLower: number,
+	BallSocketTwistUpper: number,
+	-- CollisionGroup applied to the spheres so they ignore each other (and,
+	-- if you configure it, the player). Empty string leaves the default group.
+	CollisionGroup: string,
+}
+
+local DEFAULT_CONFIG: Config = {
+	SphereScale = 0.9,
+	ShowSpheres = false,
+	BallSocketUpperAngle = 45,
+	BallSocketTwistLower = -45,
+	BallSocketTwistUpper = 45,
+	CollisionGroup = "",
+}
+
+-- Joints we never convert to a socket: the root joint anchors the whole rig and
+-- breaking it makes the character fly apart instead of crumple.
+local PRESERVED_JOINTS = {
+	RootJoint = true,
+}
+
+export type Ragdoll = typeof(setmetatable(
+	{} :: {
+		Character: Model,
+		Humanoid: Humanoid,
+		Config: Config,
+		Active: boolean,
+		_sockets: { BallSocketConstraint },
+		_attachments: { Attachment },
+		_motors: { Motor6D },
+		_spheres: { BasePart },
+		_welds: { WeldConstraint },
+	},
+	Ragdoll
+))
+
+-- Build a ragdoll controller for `character`. Does not change anything until
+-- `:Activate()` is called.
+function Ragdoll.new(character: Model, config: Config?): Ragdoll
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	assert(humanoid, "Ragdoll.new: character has no Humanoid")
+
+	local merged: Config = table.clone(DEFAULT_CONFIG)
+	if config then
+		for key, value in config :: any do
+			(merged :: any)[key] = value
+		end
+	end
+
+	local self = setmetatable({
+		Character = character,
+		Humanoid = humanoid,
+		Config = merged,
+		Active = false,
+		_sockets = {},
+		_attachments = {},
+		_motors = {},
+		_spheres = {},
+		_welds = {},
+	}, Ragdoll)
+
+	return self
+end
+
+-- Attach an invisible, collidable sphere to a limb and turn the limb's own
+-- collision off. The sphere is what actually touches the world.
+function Ragdoll._attachSphere(self: Ragdoll, limb: BasePart)
+	local size = limb.Size
+	local diameter = math.max(size.X, size.Y, size.Z) * self.Config.SphereScale
+
+	local sphere = Instance.new("Part")
+	sphere.Name = "CollisionSphere"
+	sphere.Shape = Enum.PartType.Ball
+	sphere.Size = Vector3.new(diameter, diameter, diameter)
+	sphere.Massless = true
+	sphere.CanCollide = true
+	sphere.CanQuery = false
+	sphere.CanTouch = false
+	sphere.Transparency = self.Config.ShowSpheres and 0.6 or 1
+	sphere.Color = Color3.fromRGB(255, 80, 80)
+	sphere.CFrame = limb.CFrame
+
+	if self.Config.CollisionGroup ~= "" then
+		sphere.CollisionGroup = self.Config.CollisionGroup
+	end
+
+	-- The limb stops colliding; the sphere takes over.
+	limb.CanCollide = false
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = limb
+	weld.Part1 = sphere
+	weld.Parent = sphere
+
+	sphere.Parent = limb.Parent
+
+	table.insert(self._spheres, sphere)
+	table.insert(self._welds, weld)
+end
+
+-- Swap a rigid Motor6D for a BallSocketConstraint so the joint goes floppy.
+-- The Motor6D is only disabled (not destroyed) so it can be restored verbatim.
+function Ragdoll._convertJoint(self: Ragdoll, motor: Motor6D)
+	local part0 = motor.Part0
+	local part1 = motor.Part1
+	if not part0 or not part1 then
+		return
+	end
+
+	local socketAttachment = Instance.new("Attachment")
+	socketAttachment.Name = motor.Name .. "_Socket0"
+	socketAttachment.CFrame = motor.C0
+	socketAttachment.Parent = part0
+
+	local boneAttachment = Instance.new("Attachment")
+	boneAttachment.Name = motor.Name .. "_Socket1"
+	boneAttachment.CFrame = motor.C1
+	boneAttachment.Parent = part1
+
+	local socket = Instance.new("BallSocketConstraint")
+	socket.Name = motor.Name .. "_Ragdoll"
+	socket.Attachment0 = socketAttachment
+	socket.Attachment1 = boneAttachment
+	socket.LimitsEnabled = true
+	socket.UpperAngle = self.Config.BallSocketUpperAngle
+	socket.TwistLimitsEnabled = true
+	socket.TwistLowerAngle = self.Config.BallSocketTwistLower
+	socket.TwistUpperAngle = self.Config.BallSocketTwistUpper
+	socket.MaxFrictionTorque = 0
+	socket.Parent = part1
+
+	motor.Enabled = false
+
+	table.insert(self._motors, motor)
+	table.insert(self._sockets, socket)
+	table.insert(self._attachments, socketAttachment)
+	table.insert(self._attachments, boneAttachment)
+end
+
+-- Go limp. Idempotent: calling it while already active is a no-op.
+function Ragdoll.Activate(self: Ragdoll)
+	if self.Active then
+		return
+	end
+	self.Active = true
+
+	local humanoid = self.Humanoid
+
+	-- Hand control to the physics solver and stop the Humanoid from fighting it.
+	humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+	humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
+	humanoid.PlatformStand = true
+	humanoid.AutoRotate = false
+
+	-- Convert every joint except the preserved ones.
+	for _, descendant in self.Character:GetDescendants() do
+		if descendant:IsA("Motor6D") and not PRESERVED_JOINTS[descendant.Name] then
+			self:_convertJoint(descendant)
+		end
+	end
+
+	-- Give every meaningful limb a collision sphere and disable its box collision.
+	for _, descendant in self.Character:GetDescendants() do
+		if descendant:IsA("BasePart") and descendant.CanCollide and descendant.Name ~= "CollisionSphere" then
+			self:_attachSphere(descendant)
+		end
+	end
+end
+
+-- Stand back up: undo everything `:Activate()` did.
+function Ragdoll.Deactivate(self: Ragdoll)
+	if not self.Active then
+		return
+	end
+	self.Active = false
+
+	for _, socket in self._sockets do
+		socket:Destroy()
+	end
+	for _, attachment in self._attachments do
+		attachment:Destroy()
+	end
+	for _, weld in self._welds do
+		weld:Destroy()
+	end
+	for _, sphere in self._spheres do
+		sphere:Destroy()
+	end
+
+	-- Re-enable the original joints and re-collide the limbs they drive.
+	for _, motor in self._motors do
+		motor.Enabled = true
+		if motor.Part1 then
+			motor.Part1.CanCollide = true
+		end
+	end
+
+	table.clear(self._sockets)
+	table.clear(self._attachments)
+	table.clear(self._welds)
+	table.clear(self._spheres)
+	table.clear(self._motors)
+
+	local humanoid = self.Humanoid
+	humanoid.PlatformStand = false
+	humanoid.AutoRotate = true
+	humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
+	humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+end
+
+-- Tear down any active ragdoll state and drop references.
+function Ragdoll.Destroy(self: Ragdoll)
+	self:Deactivate()
+end
+
+return Ragdoll
