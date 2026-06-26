@@ -1,19 +1,20 @@
-# Roblox Sphere Ragdoll System
+# Roblox Sphere Ragdoll System (R6)
 
-A ragdoll system for R6 and R15 characters that **collides with invisible
-spheres instead of the limb meshes**.
+A ragdoll system for **R6** characters that **collides with invisible spheres
+instead of the limb blocks**.
 
 ## Why spheres?
 
-Roblox character limbs are boxes. When a ragdoll's box limbs collide with the
-world they snag on edges, jitter against seams, and clip through corners — the
-classic "ragdoll caught on a doorframe and vibrating" look.
+R6 limbs are blocks. When a ragdoll's block limbs collide with the world they
+snag on edges, jitter against seams, and clip through corners — the classic
+"ragdoll caught on a doorframe and vibrating" look.
 
-This system disables collision on every limb and welds a transparent,
-collidable **sphere** to each one. Spheres can't catch on a corner, so the body
-tumbles and settles smoothly. The visible limbs ride along via the original
-joints (swapped from rigid `Motor6D`s to floppy `BallSocketConstraint`s), so the
-character still looks right while the hidden spheres do all the colliding.
+This system disables collision on each of the six limbs and welds a transparent,
+collidable **sphere** inside each one. Spheres can't catch on a corner, so the
+body tumbles and settles smoothly and naturally. The visible limbs ride along
+via the original joints (swapped from rigid `Motor6D`s to floppy
+`BallSocketConstraint`s), so the character still looks right while the hidden
+spheres do all the colliding.
 
 ```
  visible limb (CanCollide = false)        invisible sphere (CanCollide = true)
@@ -49,7 +50,7 @@ again to stand up; characters also ragdoll automatically when they die.
 local Ragdoll = require(game.ReplicatedStorage.Ragdoll)
 
 local ragdoll = Ragdoll.new(character, {
-    SphereScale = 0.9,      -- sphere diameter = max(limb size) * scale
+    SphereScale = 1,        -- sphere diameter = min(limb size) * scale
     ShowSpheres = false,    -- set true to see the collision spheres
     CollisionGroup = "",    -- spheres ignore each other when set
 })
@@ -63,7 +64,7 @@ ragdoll:Destroy()     -- clean up
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `SphereScale` | `0.9` | Sphere diameter as a multiple of the limb's largest dimension. |
+| `SphereScale` | `1` | Sphere diameter as a multiple of the limb's smallest dimension (keeps the sphere snug inside the limb). |
 | `ShowSpheres` | `false` | Render the spheres semi-transparent for debugging. |
 | `BallSocketUpperAngle` | `45` | Swing limit on each joint, in degrees. |
 | `BallSocketTwistLower` / `BallSocketTwistUpper` | `-45` / `45` | Twist limits, in degrees. |
@@ -75,11 +76,13 @@ ragdoll:Destroy()     -- clean up
 
 1. Puts the `Humanoid` into the `Physics` state and sets `PlatformStand` so it
    stops trying to stand.
-2. Replaces each `Motor6D` (except the root joint) with a `BallSocketConstraint`
-   built from attachments at the joint's `C0` / `C1`. The `Motor6D` is only
-   *disabled*, never destroyed, so the rig restores exactly.
-3. Sets `CanCollide = false` on every limb and welds a transparent collision
-   sphere to it.
+2. Replaces the five torso joints (`Neck`, `Left/Right Shoulder`,
+   `Left/Right Hip`) with `BallSocketConstraint`s built from attachments at each
+   joint's `C0` / `C1`. The `RootJoint` is left intact so the rig stays in one
+   piece. Each `Motor6D` is only *disabled*, never destroyed, so the rig
+   restores exactly.
+3. Sets `CanCollide = false` on each of the six limbs and welds a transparent
+   collision sphere inside it.
 
 `:Deactivate()` reverses all of it: destroys the sockets, attachments, welds and
 spheres, re-enables the motors, re-collides the limbs, and returns the Humanoid
